@@ -1,0 +1,244 @@
+on:
+  push:
+    branches:
+      - master
+    paths-ignore:
+      - '.gitignore'
+      - '*.md'
+
+jobs: 
+  snyk:
+    runs-on: ubuntu-latest
+    env:
+      ACTION: Snyk
+    steps:
+      - uses: actions/checkout@v2
+      - name: Run Snyk to check for vulnerabilities
+        uses: snyk/actions/python-3.8@master
+        continue-on-error: true
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+    
+      - name: Send telegram notifications if failure
+        uses: appleboy/telegram-action@master
+        if: ${{ failure() }} 
+        with:
+          to: ${{ secrets.TELEGRAM_TO }}
+          token: ${{ secrets.TELEGRAM_TOKEN }}
+          message: |
+            *Repository*: ${{ github.repository }}
+
+            *Action*: ${{ env.ACTION }}
+            *Status*: ${{ job.status }}
+            *Author*: ${{ github.actor }}
+
+            *Commit message*: ${{ github.event.commits[0].message }}
+            *Link*: https://github.com/${{ github.repository }}/commit/${{github.sha}}
+          format: "markdown"
+          disable_web_page_preview: true
+
+  pylint:
+    needs: snyk
+    runs-on: ubuntu-latest
+    env:
+      ACTION: Code linting
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+
+      - name: ${{ env.ACTION }}
+        uses: alexanderdamiani/pylinter@v1.2.0
+        with:
+          python-root: '.'
+          flake8-flags: '--count --show-source --statistics'
+          mypy-flags: '--ignore-missing-imports'
+          fail-on-isort: false
+      
+      - name: Send telegram notifications if failure
+        uses: appleboy/telegram-action@master
+        if: ${{ failure() }} 
+        with:
+          to: ${{ secrets.TELEGRAM_TO }}
+          token: ${{ secrets.TELEGRAM_TOKEN }}
+          message: |
+            *Repository*: ${{ github.repository }}
+
+            *Action*: ${{ env.ACTION }}
+            *Status*: ${{ job.status }}
+            *Author*: ${{ github.actor }}
+
+            *Commit message*: ${{ github.event.commits[0].message }}
+            *Link*: https://github.com/${{ github.repository }}/commit/${{github.sha}}
+          format: "markdown"
+          disable_web_page_preview: true
+
+  pytest:
+    needs: pylint
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-versions: [3.6, 3.7, 3.8, 3.9]
+    env:
+      ACTION: Testing
+    steps:
+      - name: Setup python
+        uses: actions/setup-python@v2
+        with:
+          python-version: ${{ matrix.python-versions }}
+
+      - name: Checkout
+        uses: actions/checkout@v2
+
+      - name: Run testsif
+        uses: paolorechia/fast-pytest-github-action@develop
+        with:
+          pytest_args: '.'
+          requirements_file: 'requirements.txt'
+      
+      - name: Send telegram notifications if failure
+        uses: appleboy/telegram-action@master
+        if: ${{ failure() }} 
+        with:
+          to: ${{ secrets.TELEGRAM_TO }}
+          token: ${{ secrets.TELEGRAM_TOKEN }}
+          message: |
+            *Repository*: ${{ github.repository }}
+
+            *Action*: ${{ env.ACTION }}
+            *Status*: ${{ job.status }}
+            *Author*: ${{ github.actor }}
+
+            *Commit message*: ${{ github.event.commits[0].message }}
+            *Link*: https://github.com/${{ github.repository }}/commit/${{github.sha}}
+          format: "markdown"
+          disable_web_page_preview: true
+
+  aws-ecr:
+    needs: pytest
+    runs-on: ubuntu-latest
+    env:
+      ACTION: Deploy image
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v1
+
+      - name: Configure AWS credentials
+        id: aws_credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_DEFAULT_REGION }}
+
+      - name: Log into Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v1
+
+      - name: Checkout
+        uses: actions/checkout@v2
+
+      - name: Build & push image to AWS ECR
+        uses: theikkila/aws-ecr-action@v1
+        with:
+          access_key_id: ${{ secrets.AWS_ACCESS_KEY }}
+          secret_access_key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          account_id: ${{ steps.aws_credentials.outputs.aws-account-id }}
+          repo: python
+          region: ${{ secrets.AWS_DEFAULT_REGION }}
+          tags: latest
+          create_repo: true
+
+      - name: Send telegram notifications if failure
+        uses: appleboy/telegram-action@master
+        if: ${{ failure() }} 
+        with:
+          to: ${{ secrets.TELEGRAM_TO }}
+          token: ${{ secrets.TELEGRAM_TOKEN }}
+          message: |
+            *Repository*: ${{ github.repository }}
+
+            *Action*: ${{ env.ACTION }}
+            *Status*: ${{ job.status }}
+            *Author*: ${{ github.actor }}
+
+            *Commit message*: ${{ github.event.commits[0].message }}
+            *Link*: https://github.com/${{ github.repository }}/commit/${{github.sha}}
+          format: "markdown"
+          disable_web_page_preview: true
+
+  terraform:
+    needs: aws-ecr
+    runs-on: ubuntu-latest
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
+      ACTION: Deploy infrastructure
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+        with:
+          repository: oleg1995petrov/andersen-exam-go-infrastructure
+
+      - name: Setup terraform
+        uses: hashicorp/setup-terraform@v1
+
+      - name: Terraform format
+        run: terraform fmt -check
+        continue-on-error: true
+
+      - name: Terraform init
+        run: terraform init
+      
+      - name: Terraform validate
+        run: terraform validate -no-color
+
+      - name: Terraform plan
+        id: plan
+        run: terraform plan -no-color
+        continue-on-error: true
+
+      - name: Terraform Plan Status
+        if: steps.plan.outcome == 'failure'
+        run: exit 1
+
+      - name: Terraform Apply
+        run: terraform apply -auto-approve
+      
+      - name: Send telegram notifications if failure
+        uses: appleboy/telegram-action@master
+        if: ${{ failure() }} 
+        with:
+          to: ${{ secrets.TELEGRAM_TO }}
+          token: ${{ secrets.TELEGRAM_TOKEN }}
+          message: |
+            *Repository*: ${{ github.repository }}
+
+            *Action*: ${{ env.ACTION }}
+            *Status*: ${{ job.status }}
+            *Author*: ${{ github.actor }}
+            
+            *Commit message*: ${{ github.event.commits[0].message }}
+            *Link*: https://github.com/${{ github.repository }}/commit/${{github.sha}}
+          format: markdown
+          disable_web_page_preview: true
+
+  telegram:
+    needs: terraform
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send telegram notification if success
+        uses: appleboy/telegram-action@master
+        if: ${{ success() }} 
+        with:
+          to: ${{ secrets.TELEGRAM_TO }}
+          token: ${{ secrets.TELEGRAM_TOKEN }}
+          message: |
+            *Repository*: ${{ github.repository }}
+            *Action successfully finished*
+
+            *Author*: ${{ github.actor }}
+            *Commit message*: ${{ github.event.commits[0].message }}
+            *Link*: https://github.com/${{ github.repository }}/commit/${{github.sha}}
+          format: markdown
+          disable_web_page_preview: true
