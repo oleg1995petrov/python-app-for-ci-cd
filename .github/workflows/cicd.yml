@@ -180,7 +180,7 @@ jobs:
           format: "markdown"
           disable_web_page_preview: true
 
-  aws-ecr-deploy":
+  aws-ecr-deploy:
     needs: aws-ecr-create
     runs-on: ubuntu-latest
     env:
