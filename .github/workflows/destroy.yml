@@ -1,14 +1,14 @@
-on: 
-  - workflow_dispatch
+on: workflow_dispatch
+
+env:
+  AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY }}
+  AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+  AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
+  ACTION: Destroy infrastructure
 
 jobs:
-  terraform:
+  terraform1:
     runs-on: ubuntu-latest
-    env:
-      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-      AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
-      ACTION: Destroy infrastructure
     steps:
       - name: Checkout
         uses: actions/checkout@v2
@@ -24,15 +24,49 @@ jobs:
       - name: Terraform Destroy
         run: terraform destroy -auto-approve
       
-      - name: Send telegram notification if success
+      - name: Send telegram notification if failure
         uses: appleboy/telegram-action@master
-        if: ${{ failure() || success() }} 
+        if: ${{ failure() }} 
         with:
           to: ${{ secrets.TELEGRAM_TO }}
           token: ${{ secrets.TELEGRAM_TOKEN }}
           message: |
             *Repository*: ${{ github.repository }}
 
+            *Action*: ${{ env.ACTION }}
+            *Status*: ${{ job.status }}
+          format: markdown
+          disable_web_page_preview: true
+
+  terraform2:
+    needs: terraform1
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ecr
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+        with:
+          repository: oleg1995petrov/andersen-exam-python-infrastructure
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v1
+
+      - name: Terraform Init
+        run: terraform init
+
+      - name: Terraform Destroy
+        run: terraform destroy -auto-approve
+
+      - name: Send telegram notification
+        uses: appleboy/telegram-action@master
+        if: ${{ always() }} 
+        with:
+          to: ${{ secrets.TELEGRAM_TO }}
+          token: ${{ secrets.TELEGRAM_TOKEN }}
+          message: |
+            *Repository*: ${{ github.repository }}
             *Action*: ${{ env.ACTION }}
             *Status*: ${{ job.status }}
           format: markdown

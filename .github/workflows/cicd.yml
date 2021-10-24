@@ -3,8 +3,13 @@ on:
     branches:
       - master
     paths-ignore:
+      # - '.github/workflows/*'
       - '.gitignore'
       - '*.md'
+      - '.png'
+
+env:
+  IMAGE_TAG: ${{github.sha}}
 
 jobs: 
   snyk:
@@ -12,14 +17,16 @@ jobs:
     env:
       ACTION: Snyk
     steps:
-      - uses: actions/checkout@v2
+      - name: Checkout
+        uses: actions/checkout@v2
+
       - name: Run Snyk to check for vulnerabilities
         uses: snyk/actions/python-3.8@master
         continue-on-error: true
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
     
-      - name: Send telegram notifications if failure
+      - name: Send telegram notification if failure
         uses: appleboy/telegram-action@master
         if: ${{ failure() }} 
         with:
@@ -27,12 +34,12 @@ jobs:
           token: ${{ secrets.TELEGRAM_TOKEN }}
           message: |
             *Repository*: ${{ github.repository }}
-
             *Action*: ${{ env.ACTION }}
+
             *Status*: ${{ job.status }}
             *Author*: ${{ github.actor }}
-
             *Commit message*: ${{ github.event.commits[0].message }}
+
             *Link*: https://github.com/${{ github.repository }}/commit/${{github.sha}}
           format: "markdown"
           disable_web_page_preview: true
@@ -54,7 +61,7 @@ jobs:
           mypy-flags: '--ignore-missing-imports'
           fail-on-isort: false
       
-      - name: Send telegram notifications if failure
+      - name: Send telegram notification if failure
         uses: appleboy/telegram-action@master
         if: ${{ failure() }} 
         with:
@@ -62,12 +69,12 @@ jobs:
           token: ${{ secrets.TELEGRAM_TOKEN }}
           message: |
             *Repository*: ${{ github.repository }}
-
             *Action*: ${{ env.ACTION }}
+
             *Status*: ${{ job.status }}
             *Author*: ${{ github.actor }}
-
             *Commit message*: ${{ github.event.commits[0].message }}
+
             *Link*: https://github.com/${{ github.repository }}/commit/${{github.sha}}
           format: "markdown"
           disable_web_page_preview: true
@@ -81,15 +88,15 @@ jobs:
     env:
       ACTION: Testing
     steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+
       - name: Setup python
         uses: actions/setup-python@v2
         with:
           python-version: ${{ matrix.python-versions }}
 
-      - name: Checkout
-        uses: actions/checkout@v2
-
-      - name: Run testsif
+      - name: Run tests
         uses: paolorechia/fast-pytest-github-action@develop
         with:
           pytest_args: '.'
@@ -103,12 +110,12 @@ jobs:
           token: ${{ secrets.TELEGRAM_TOKEN }}
           message: |
             *Repository*: ${{ github.repository }}
-
             *Action*: ${{ env.ACTION }}
+
             *Status*: ${{ job.status }}
             *Author*: ${{ github.actor }}
-
             *Commit message*: ${{ github.event.commits[0].message }}
+
             *Link*: https://github.com/${{ github.repository }}/commit/${{github.sha}}
           format: "markdown"
           disable_web_page_preview: true
@@ -117,10 +124,43 @@ jobs:
     needs: pytest
     runs-on: ubuntu-latest
     env:
-      ACTION: Deploy image
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
+      ACTION: Build & deploy image to ECR
+    defaults:
+      run:
+        working-directory: ecr
     steps:
       - name: Checkout
-        uses: actions/checkout@v1
+        uses: actions/checkout@v2
+        with:
+          repository: oleg1995petrov/andersen-exam-python-infrastructure
+
+      - name: Setup terraform
+        uses: hashicorp/setup-terraform@v1
+
+      - name: Terraform format
+        run: terraform fmt -check
+        continue-on-error: true
+
+      - name: Terraform init
+        run: terraform init
+      
+      - name: Terraform validate
+        run: terraform validate -no-color
+
+      - name: Terraform plan
+        id: plan
+        run: terraform plan -no-color
+        continue-on-error: true
+
+      - name: Terraform Plan Status
+        if: steps.plan.outcome == 'failure'
+        run: exit 1
+
+      - name: Terraform Apply
+        run: terraform apply -auto-approve
 
       - name: Configure AWS credentials
         id: aws_credentials
@@ -137,16 +177,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v2
 
-      - name: Build & push image to AWS ECR
-        uses: theikkila/aws-ecr-action@v1
-        with:
-          access_key_id: ${{ secrets.AWS_ACCESS_KEY }}
-          secret_access_key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          account_id: ${{ steps.aws_credentials.outputs.aws-account-id }}
-          repo: python
-          region: ${{ secrets.AWS_DEFAULT_REGION }}
-          tags: latest
-          create_repo: true
+      - name: Build, tag, and push image to Amazon ECR
+        env:
+          REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          REPOSITORY: python
+        run: |
+          docker build -t $REGISTRY/$REPOSITORY:$IMAGE_TAG .
+          docker push $REGISTRY/$REPOSITORY:$IMAGE_TAG
 
       - name: Send telegram notifications if failure
         uses: appleboy/telegram-action@master
@@ -156,12 +193,12 @@ jobs:
           token: ${{ secrets.TELEGRAM_TOKEN }}
           message: |
             *Repository*: ${{ github.repository }}
-
             *Action*: ${{ env.ACTION }}
+
             *Status*: ${{ job.status }}
             *Author*: ${{ github.actor }}
-
             *Commit message*: ${{ github.event.commits[0].message }}
+
             *Link*: https://github.com/${{ github.repository }}/commit/${{github.sha}}
           format: "markdown"
           disable_web_page_preview: true
@@ -178,7 +215,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v2
         with:
-          repository: oleg1995petrov/andersen-exam-go-infrastructure
+          repository: oleg1995petrov/andersen-exam-python-infrastructure
 
       - name: Setup terraform
         uses: hashicorp/setup-terraform@v1
@@ -205,40 +242,20 @@ jobs:
       - name: Terraform Apply
         run: terraform apply -auto-approve
       
-      - name: Send telegram notifications if failure
+      - name: Send telegram notification
         uses: appleboy/telegram-action@master
-        if: ${{ failure() }} 
+        if: ${{ always() }} 
         with:
           to: ${{ secrets.TELEGRAM_TO }}
           token: ${{ secrets.TELEGRAM_TOKEN }}
           message: |
             *Repository*: ${{ github.repository }}
-
             *Action*: ${{ env.ACTION }}
+
             *Status*: ${{ job.status }}
             *Author*: ${{ github.actor }}
+            *Commit message*: ${{ github.event.commits[0].message }}
             
-            *Commit message*: ${{ github.event.commits[0].message }}
-            *Link*: https://github.com/${{ github.repository }}/commit/${{github.sha}}
-          format: markdown
-          disable_web_page_preview: true
-
-  telegram:
-    needs: terraform
-    runs-on: ubuntu-latest
-    steps:
-      - name: Send telegram notification if success
-        uses: appleboy/telegram-action@master
-        if: ${{ success() }} 
-        with:
-          to: ${{ secrets.TELEGRAM_TO }}
-          token: ${{ secrets.TELEGRAM_TOKEN }}
-          message: |
-            *Repository*: ${{ github.repository }}
-            *Action successfully finished*
-
-            *Author*: ${{ github.actor }}
-            *Commit message*: ${{ github.event.commits[0].message }}
             *Link*: https://github.com/${{ github.repository }}/commit/${{github.sha}}
           format: markdown
           disable_web_page_preview: true
