@@ -18,4 +18,4 @@ FROM scratch
 EXPOSE 5000
 COPY --from=py_builder /build/tmp /tmp
 COPY --from=py_builder /build/app /
-CMD ["./app"]  
+CMD ["./app"]
