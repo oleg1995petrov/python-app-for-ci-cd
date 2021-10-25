@@ -6,7 +6,7 @@ on:
       # - '.github/workflows/*'
       - '.gitignore'
       - '*.md'
-      - '.png'
+      - '*.png'
 
 env:
   IMAGE_TAG: ${{ github.sha }}
