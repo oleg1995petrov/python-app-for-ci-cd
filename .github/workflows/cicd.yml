@@ -9,7 +9,7 @@ on:
       - '.png'
 
 env:
-  IMAGE_TAG: ${{github.sha}}
+  IMAGE_TAG: ${{ github.sha }}
 
 jobs: 
   snyk:
@@ -256,7 +256,7 @@ jobs:
 
       - name: Terraform plan
         id: plan
-        run: terraform plan -no-color
+        run: terraform plan -no-color -var="image_tag=$IMAGE_TAG"
         continue-on-error: true
 
       - name: Terraform Plan Status
@@ -264,7 +264,7 @@ jobs:
         run: exit 1
 
       - name: Terraform Apply
-        run: terraform apply -auto-approve
+        run: terraform apply -auto-approve -var="image_tag=$IMAGE_TAG"
       
       - name: Send telegram notification
         uses: appleboy/telegram-action@master
