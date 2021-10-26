@@ -13,7 +13,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v2
         with:
-          repository: oleg1995petrov/andersen-exam-python-infrastructure
+          repository: oleg1995petrov/aws-infrastructure-for-python-app
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v1
@@ -48,7 +48,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v2
         with:
-          repository: oleg1995petrov/andersen-exam-python-infrastructure
+          repository: oleg1995petrov/aws-infrastructure-for-python-app
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v1
